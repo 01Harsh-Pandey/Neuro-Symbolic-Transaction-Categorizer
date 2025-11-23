@@ -1,0 +1,32 @@
+FINAL CLASSIFICATION REPORT
+==================================================
+Macro F1: 0.9305
+Micro F1: 0.9315
+Weighted F1: 0.9309
+
+                                 precision    recall  f1-score   support
+
+      Bills & Utilities > Water     0.8673    0.9703    0.9159       101
+    Food & Dining > Restaurants     0.9600    0.9697    0.9648        99
+             Income > Transfers     0.9468    0.9674    0.9570        92
+       Transportation > Parking     0.9706    1.0000    0.9851        99
+      Food & Dining > Groceries     0.9727    0.9469    0.9596       113
+   Food & Dining > Coffee Shops     0.9455    0.9905    0.9674       105
+Transportation > Public Transit     0.9091    0.8163    0.8602        98
+     Transportation > Rideshare     0.9898    0.9700    0.9798       100
+   Shopping > Department Stores     0.9896    0.9596    0.9744        99
+            Shopping > Clothing     0.9394    0.9300    0.9347       100
+           Income > Investments     0.9798    0.9604    0.9700       101
+Bills & Utilities > Electricity     0.9878    0.8351    0.9050        97
+                Income > Salary     0.9485    0.9388    0.9436        98
+   Bills & Utilities > Internet     0.7431    0.8265    0.7826        98
+      Bills & Utilities > Phone     0.7952    0.6735    0.7293        98
+      Food & Dining > Fast Food     0.8667    0.9720    0.9163       107
+          Shopping > E-Commerce     0.9485    0.9583    0.9534        96
+             Income > Freelance     0.9500    0.9694    0.9596        98
+         Shopping > Electronics     0.9515    0.9608    0.9561       102
+          Transportation > Fuel     0.9900    1.0000    0.9950        99
+
+                       accuracy                         0.9315      2000
+                      macro avg     0.9326    0.9308    0.9305      2000
+                   weighted avg     0.9327    0.9315    0.9309      2000

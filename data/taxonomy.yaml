@@ -1,0 +1,61 @@
+# data/taxonomy.yaml
+taxonomy:
+  - id: "transport"
+    name: "Transportation"
+    subcategories:
+      - name: "Rideshare"
+        keywords: ["uber", "lyft", "ola", "grab", "cab", "ride", "taxi"]
+      - name: "Fuel"
+        keywords: ["shell", "bp", "exxon", "gas station", "petrol", "chevron", "mobil", "fuel", "gas"]
+      - name: "Public Transit"
+        keywords: ["amtrak", "subway", "metro", "mta", "train", "bus", "transit", "rail"]
+      - name: "Parking"
+        keywords: ["parking", "garage", "lot", "valet"]
+
+  - id: "dining"
+    name: "Food & Dining"
+    subcategories:
+      - name: "Coffee Shops"
+        keywords: ["starbucks", "dunkin", "costa", "tim hortons", "coffee", "cafe", "espresso"]
+      - name: "Restaurants"
+        keywords: ["mcdonalds", "burger king", "chipotle", "dominos", "pizza", "bistro", "restaurant", "diner", "grill"]
+      - name: "Groceries"
+        keywords: ["whole foods", "walmart", "kroger", "tesco", "market", "trader joes", "safeway", "aldi", "costco"]
+      - name: "Fast Food"
+        keywords: ["kfc", "wendys", "taco bell", "subway", "arbys"]
+
+  - id: "shopping"
+    name: "Shopping"
+    subcategories:
+      - name: "Electronics"
+        keywords: ["apple", "best buy", "micro center", "samsung", "electronics", "tech", "computer"]
+      - name: "E-Commerce"
+        keywords: ["amazon", "ebay", "shopify", "etsy", "amzn", "online", "webstore"]
+      - name: "Clothing"
+        keywords: ["zara", "h&m", "uniqlo", "nike", "adidas", "clothing", "apparel", "fashion"]
+      - name: "Department Stores"
+        keywords: ["target", "macys", "kohls", "sears", "jcpenney"]
+
+  - id: "utilities"
+    name: "Bills & Utilities"
+    subcategories:
+      - name: "Internet"
+        keywords: ["comcast", "verizon", "at&t", "t-mobile", "vodafone", "xfinity", "spectrum"]
+      - name: "Electricity"
+        keywords: ["edison", "power", "electric", "energy", "solar", "utility", "conedison"]
+      - name: "Water"
+        keywords: ["water", "aqua", "utility", "bill"]
+      - name: "Phone"
+        keywords: ["verizon", "at&t", "t-mobile", "sprint", "mobile", "cell"]
+
+  - id: "income"
+    name: "Income"
+    subcategories:
+      - name: "Salary"
+        keywords: ["payroll", "direct deposit", "salary", "employer", "paycheck", "wages"]
+      - name: "Transfers"
+        keywords: ["zelle", "venmo", "cash app", "transfer from", "paypal", "deposit"]
+      - name: "Freelance"
+        keywords: ["freelance", "contract", "gig", "upwork", "fiverr"]
+      - name: "Investments"
+        keywords: ["dividend", "interest", "investment", "robinhood", "fidelity"]
