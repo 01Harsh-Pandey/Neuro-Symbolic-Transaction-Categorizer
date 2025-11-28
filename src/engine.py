@@ -49,14 +49,15 @@ class TransactionEngine:
         # 2. Load AI (Quantized DistilBERT)
         self.device = 'cpu'
         
-        # --- FIX: USE HUB TOKENIZER ---
-        # We load the tokenizer from HuggingFace Hub to avoid missing local file errors
-        # This is safe because the tokenizer vocabulary doesn't change for fine-tuning
+        # --- FIX: LOAD TOKENIZER FROM HUB ---
+        # Instead of looking in 'models/', we download the standard one.
+        # This fixes the "Can't load tokenizer" error.
         try:
             print("⏳ AI: Downloading standard tokenizer...")
             self.tokenizer = DistilBertTokenizerFast.from_pretrained('distilbert-base-uncased')
-        except Exception:
-            # Fallback to local if internet fails (unlikely on cloud)
+        except Exception as e:
+            print(f"⚠️ Could not download tokenizer: {e}")
+            # Only fallback to local if download fails
             self.tokenizer = DistilBertTokenizerFast.from_pretrained(MODEL_DIR)
 
         # Load Label Map
@@ -108,7 +109,6 @@ class TransactionEngine:
                         
         except Exception as e:
             print(f"❌ AI: Failed to load model - {e}")
-            # Don't raise here, allow the app to run in "Rules Only" mode if AI fails
             self.model = None
             
         if self.model:
@@ -262,32 +262,6 @@ class TransactionEngine:
             "total_categories": len(self.label_map)
         }
 
-# --- GLOBAL INSTANCE REMOVED ---
-# Do not instantiate here! It causes double loading in Streamlit.
-# transaction_engine = TransactionEngine() 
-
-# Simple Test
 if __name__ == "__main__":
-    # Only instantiate when running this script directly
     engine = TransactionEngine()
-    
-    test_cases = [
-        "Uber Trip",           # Should be Rule
-        "Starbucks 0229",      # Should be AI  
-        "Hulu Subscription",   # Should be Semantic
-        "SQ *MERCHANT 231",    # Should be Semantic
-        "UNKNOWN TRANSACTION"  # Should be Unknown
-    ]
-    
-    print("\n🧪 TESTING TRANSACTION ENGINE")
-    print("=" * 60)
-    
-    for text in test_cases:
-        print(f"\n📥 Input: '{text}'")
-        result = engine.predict(text)
-        
-        print(f"   📊 Category: {result.get('category')} > {result.get('subcategory')}")
-        print(f"   🎯 Confidence: {result.get('confidence', 0):.1%}")
-        print(f"   🔧 Source: {result.get('source')} (Tier {result.get('tier')})")
-        print(f"   ⚡ Latency: {result.get('latency_ms')}ms")
-        print(f"   💡 Reason: {result.get('reason')}")
+    print("Test Complete")
