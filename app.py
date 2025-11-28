@@ -566,15 +566,6 @@ def main():
     # Sidebar navigation
     st.sidebar.markdown("# 🧠 Neuro-Symbolic Engine")
     
-    # --- DIAGNOSTIC EXPANDER (Debugging for Cloud) ---
-    with st.sidebar.expander("🛠️ System Diagnostics"):
-        st.write(f"**CWD:** `{os.getcwd()}`")
-        if os.path.exists("models"):
-            st.success("Models dir found")
-            st.text("\n".join(os.listdir("models")[:5])) # Show first 5 files
-        else:
-            st.error("❌ Models dir MISSING")
-    # ------------------------------------------------
     
     st.sidebar.markdown("---")
     
