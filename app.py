@@ -77,7 +77,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Cache the engine to avoid reloading on every interaction
 @st.cache_resource
 def load_engine():
     """Load the transaction engine with error handling"""
@@ -150,7 +149,7 @@ def render_pipeline_visualization(tier_results):
             st.markdown(f'<div class="tier-card {css_class}">', unsafe_allow_html=True)
             st.markdown("**🧠 Tier 2: AI Model**")
             st.markdown(f"**Status:** {'✅ CONFIDENT' if tier2_status['active'] else '❌ LOW CONFIDENCE' if tier2_status['reached'] else '⚡ BYPASSED'}")
-            if tier2_status.get('confidence'):
+            if tier2_status.get('confidence') is not None:
                 st.markdown(f"**Confidence:** {tier2_status['confidence']:.1%}")
             if tier2_status.get('latency'):
                 st.markdown(f"**Latency:** {tier2_status['latency']}ms")
@@ -163,13 +162,28 @@ def render_pipeline_visualization(tier_results):
             st.markdown(f'<div class="tier-card {css_class}">', unsafe_allow_html=True)
             st.markdown("**💾 Tier 3: Vector Memory**")
             st.markdown(f"**Status:** {'✅ FALLBACK' if tier3_status['active'] else '⚡ BYPASSED'}")
-            if tier3_status.get('similarity'):
+            if tier3_status.get('similarity') is not None:
                 st.markdown(f"**Similarity:** {tier3_status['similarity']:.3f}")
             if tier3_status.get('latency'):
                 st.markdown(f"**Latency:** {tier3_status['latency']}ms")
             st.markdown('</div>', unsafe_allow_html=True)
         
         st.markdown('</div>', unsafe_allow_html=True)
+
+def normalize_result(result):
+    """Infer missing keys in result dict, such as tier from source."""
+    # If 'tier' not present or None, infer from 'source'
+    if result.get('tier') is None:
+        source = result.get('source', '').lower()
+        if 'rule' in source:
+            result['tier'] = 1
+        elif 'ai' in source:
+            result['tier'] = 2
+        elif 'memory' in source or 'semantic' in source or 'vector' in source:
+            result['tier'] = 3
+        else:
+            result['tier'] = 3  # default fallback tier
+    return result
 
 def render_result_card(result):
     """Render the classification result card"""
@@ -182,32 +196,33 @@ def render_result_card(result):
         
         with col1:
             st.markdown(f"**🎯 Category**")
-            st.markdown(f"# {result['category']} > {result['subcategory']}")
+            st.markdown(f"# {result.get('category', '')} > {result.get('subcategory', '')}")
             
         with col2:
             st.markdown(f"**📈 Confidence**")
-            confidence_color = "normal" if result['confidence'] > 0.7 else "off" if result['confidence'] > 0.4 else "inverse"
+            confidence = result.get('confidence', 0)
+            confidence_color = "normal" if confidence > 0.7 else "off" if confidence > 0.4 else "inverse"
             st.metric(
                 label="Confidence Score",
-                value=f"{result['confidence']:.1%}",
+                value=f"{confidence:.1%}",
                 delta=None,
                 delta_color=confidence_color
             )
             
         with col3:
             st.markdown(f"**⚡ Performance**")
-            avg_latency = np.mean([r['latency_ms'] for r in st.session_state.inference_history[-10:]]) if st.session_state.inference_history else 0
-            latency_delta = avg_latency - result['latency_ms'] if avg_latency > 0 else None
+            avg_latency = np.mean([r['result'].get('latency_ms', 0) for r in st.session_state.inference_history[-10:]]) if st.session_state.inference_history else 0
+            latency_delta = avg_latency - result.get('latency_ms', 0) if avg_latency > 0 else None
             st.metric(
                 label="Latency",
-                value=f"{result['latency_ms']}ms",
+                value=f"{result.get('latency_ms', 0)}ms",
                 delta=f"{(latency_delta or 0):.1f}ms" if latency_delta is not None else None,
                 delta_color="normal" if (latency_delta or 0) > 0 else "inverse"
             )
         
         # Reason box
         st.markdown("**💡 Decision Reasoning**")
-        st.info(result['reason'])
+        st.info(result.get('reason', ''))
         
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -255,6 +270,7 @@ def mode_live_inference(engine):
             # Run inference
             start_time = time.time()
             result = engine.predict(transaction_input)
+            result = normalize_result(result)
             processing_time = (time.time() - start_time) * 1000
             
             # Add to history
@@ -271,20 +287,20 @@ def mode_live_inference(engine):
                 'tier1': {
                     'active': result['tier'] == 1,
                     'reached': True,  # Always check tier 1 first
-                    'latency': result['latency_ms'] if result['tier'] == 1 else None,
-                    'reason': result['reason'] if result['tier'] == 1 else None
+                    'latency': result.get('latency_ms', 0) if result['tier'] == 1 else None,
+                    'reason': result.get('reason', '') if result['tier'] == 1 else None
                 },
                 'tier2': {
                     'active': result['tier'] == 2,
                     'reached': result['tier'] >= 2,
-                    'confidence': result['confidence'] if result['tier'] == 2 else None,
-                    'latency': result['latency_ms'] if result['tier'] == 2 else None
+                    'confidence': result.get('confidence', 0) if result['tier'] == 2 else None,
+                    'latency': result.get('latency_ms', 0) if result['tier'] == 2 else None
                 },
                 'tier3': {
                     'active': result['tier'] == 3,
                     'reached': True,  # Always the last resort
                     'similarity': result.get('similarity', 0),
-                    'latency': result['latency_ms'] if result['tier'] == 3 else None
+                    'latency': result.get('latency_ms', 0) if result['tier'] == 3 else None
                 }
             }
             
@@ -295,7 +311,7 @@ def mode_live_inference(engine):
             render_result_card(result)
             
             # Show success toast
-            st.toast(f"✅ Classification complete! Tier {result['tier']} - {result['latency_ms']}ms", icon="🎯")
+            st.toast(f"✅ Classification complete! Tier {result['tier']} - {result.get('latency_ms', 0)}ms", icon="🎯")
     
     # Recent inferences
     if st.session_state.inference_history:
@@ -303,12 +319,12 @@ def mode_live_inference(engine):
         recent_df = pd.DataFrame([
             {
                 'Time': entry['timestamp'].strftime('%H:%M:%S'),
-                'Input': entry['input'][:50] + '...' if len(entry['input']) > 50 else entry['input'],
-                'Category': entry['result']['category'],
-                'Subcategory': entry['result']['subcategory'],
-                'Tier': entry['result']['tier'],
-                'Confidence': f"{entry['result']['confidence']:.1%}",
-                'Latency': f"{entry['result']['latency_ms']}ms"
+                'Input': (entry['input'][:50] + '...') if len(entry['input']) > 50 else entry['input'],
+                'Category': entry['result'].get('category', ''),
+                'Subcategory': entry['result'].get('subcategory', ''),
+                'Tier': entry['result'].get('tier', ''),
+                'Confidence': f"{entry['result'].get('confidence', 0):.1%}",
+                'Latency': f"{entry['result'].get('latency_ms', 0)}ms"
             }
             for entry in st.session_state.inference_history[-5:]
         ])
@@ -389,7 +405,6 @@ def mode_taxonomy_operations():
             metric_cols[1].metric("Subcategories", total_subcategories)
             metric_cols[2].metric("Keywords", total_keywords)
             metric_cols[3].metric("Total Rules", total_keywords)
-            
     except yaml.YAMLError as e:
         st.error(f"❌ YAML Syntax Error: {str(e)}")
 
@@ -419,12 +434,9 @@ def mode_analytics(engine):
     
     # Display batch results if available
     if st.session_state.batch_results:
-        results = st.session_state.batch_results
-        df = results['dataframe']
+        st.markdown("#### 📈 Performance Metrics")
         
-        # Key metrics
-        st.markdown("### 📈 Performance Metrics")
-        
+        df = st.session_state.batch_results['dataframe']
         metric_cols = st.columns(4)
         with metric_cols[0]:
             avg_latency = df['latency_ms'].mean()
@@ -434,7 +446,6 @@ def mode_analytics(engine):
                 delta="- Fast" if avg_latency < 20 else "+ Slow" if avg_latency > 50 else None,
                 delta_color="inverse" if avg_latency > 50 else "normal"
             )
-        
         with metric_cols[1]:
             rule_coverage = (df['tier'] == 1).mean() * 100
             st.metric(
@@ -442,7 +453,6 @@ def mode_analytics(engine):
                 f"{rule_coverage:.1f}%",
                 delta="+ Efficient" if rule_coverage > 60 else "- Needs Rules" if rule_coverage < 30 else None
             )
-        
         with metric_cols[2]:
             ai_confidence = df[df['tier'] == 2]['confidence'].mean() if (df['tier'] == 2).any() else 0
             st.metric(
@@ -450,7 +460,6 @@ def mode_analytics(engine):
                 f"{ai_confidence:.1%}",
                 delta="+ Reliable" if ai_confidence > 0.7 else "- Uncertain" if ai_confidence < 0.5 else None
             )
-        
         with metric_cols[3]:
             fallback_rate = (df['tier'] == 3).mean() * 100
             st.metric(
@@ -495,7 +504,6 @@ def mode_analytics(engine):
         display_df['latency_ms'] = display_df['latency_ms'].apply(lambda x: f"{x:.1f}ms")
         
         st.dataframe(display_df, use_container_width=True, height=300)
-    
     else:
         # Placeholder when no batch results
         st.info("👆 Click 'Process Sample Transactions' to run batch analysis and see performance metrics.")
@@ -515,14 +523,15 @@ def process_batch_transactions(engine):
             status_text.text(f"Processing {i+1}/{len(sample_df)}: {row.raw_text[:30]}...")
             
             result = engine.predict(row.raw_text)
+            result = normalize_result(result)
             results.append({
                 'input': row.raw_text,
-                'category': result['category'],
-                'subcategory': result['subcategory'],
-                'source': result['source'],
-                'confidence': result['confidence'],
-                'tier': result['tier'],
-                'latency_ms': result['latency_ms']
+                'category': result.get('category', ''),
+                'subcategory': result.get('subcategory', ''),
+                'source': result.get('source', ''),
+                'confidence': result.get('confidence', 0),
+                'tier': result.get('tier', 0),
+                'latency_ms': result.get('latency_ms', 0)
             })
             
             progress_bar.progress((i + 1) / len(sample_df))
@@ -574,7 +583,7 @@ def main():
     st.sidebar.markdown("**📊 System Info**")
     
     if st.session_state.inference_history:
-        recent_latency = np.mean([r['result']['latency_ms'] for r in st.session_state.inference_history[-5:]])
+        recent_latency = np.mean([r['result'].get('latency_ms', 0) for r in st.session_state.inference_history[-5:]])
         st.sidebar.metric("Avg Latency", f"{recent_latency:.1f}ms")
     
     st.sidebar.metric("Inferences", len(st.session_state.inference_history))
