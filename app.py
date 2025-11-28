@@ -9,8 +9,12 @@ import yaml
 from datetime import datetime
 import numpy as np
 
-# Add src to path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+# --- CLOUD DEPLOYMENT FIX: PATH NORMALIZATION ---
+# This ensures the app always finds files relative to app.py, not the server root
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(BASE_DIR)  # Force working directory to project root
+sys.path.append(os.path.join(BASE_DIR, 'src'))
+# ------------------------------------------------
 
 # Configure page
 st.set_page_config(
@@ -82,10 +86,13 @@ def load_engine():
     """Load the transaction engine with error handling"""
     try:
         from engine import TransactionEngine
+        # Pass the absolute path to ensure robustness
         engine = TransactionEngine()
         return engine, None
     except Exception as e:
-        return None, str(e)
+        # Return the full traceback for debugging
+        import traceback
+        return None, f"{str(e)}\n\n{traceback.format_exc()}"
 
 def initialize_session_state():
     """Initialize session state variables"""
@@ -99,7 +106,8 @@ def initialize_session_state():
 def load_taxonomy_file():
     """Load current taxonomy.yaml content"""
     try:
-        with open('data/taxonomy.yaml', 'r') as f:
+        file_path = os.path.join(BASE_DIR, 'data', 'taxonomy.yaml')
+        with open(file_path, 'r') as f:
             return f.read()
     except Exception as e:
         return f"# Error loading taxonomy file: {str(e)}"
@@ -107,7 +115,8 @@ def load_taxonomy_file():
 def save_taxonomy_file(content):
     """Save taxonomy.yaml and clear cache"""
     try:
-        with open('data/taxonomy.yaml', 'w') as f:
+        file_path = os.path.join(BASE_DIR, 'data', 'taxonomy.yaml')
+        with open(file_path, 'w') as f:
             f.write(content)
         
         # Clear caches to force reload
@@ -512,7 +521,8 @@ def process_batch_transactions(engine):
     """Process a batch of transactions for analytics"""
     try:
         # Load synthetic dataset
-        df = pd.read_csv('data/synthetic_dataset.csv')
+        file_path = os.path.join(BASE_DIR, 'data', 'synthetic_dataset.csv')
+        df = pd.read_csv(file_path)
         sample_df = df.head(100)  # First 100 rows
         
         results = []
@@ -553,12 +563,23 @@ def main():
     # Initialize session state
     initialize_session_state()
     
-    # Load engine
-    engine, error = load_engine()
-    
     # Sidebar navigation
     st.sidebar.markdown("# 🧠 Neuro-Symbolic Engine")
+    
+    # --- DIAGNOSTIC EXPANDER (Debugging for Cloud) ---
+    with st.sidebar.expander("🛠️ System Diagnostics"):
+        st.write(f"**CWD:** `{os.getcwd()}`")
+        if os.path.exists("models"):
+            st.success("Models dir found")
+            st.text("\n".join(os.listdir("models")[:5])) # Show first 5 files
+        else:
+            st.error("❌ Models dir MISSING")
+    # ------------------------------------------------
+    
     st.sidebar.markdown("---")
+    
+    # Load engine
+    engine, error = load_engine()
     
     # Engine status in sidebar
     if engine:
@@ -568,7 +589,8 @@ def main():
         st.sidebar.metric("Memory", f"{info['semantic_references']} refs")
     else:
         st.sidebar.error("❌ Engine Offline")
-        st.sidebar.error(f"Error: {error}")
+        # Ensure error is string
+        st.sidebar.code(str(error)[:300] + "..." if len(str(error)) > 300 else str(error))
     
     st.sidebar.markdown("---")
     
@@ -597,7 +619,7 @@ def main():
         mode_analytics(engine)
     else:
         if not engine:
-            st.error(f"🚫 Engine not available: {error}")
+            st.error(f"🚫 Engine not available. Check sidebar diagnostics for details.")
             st.info("Please check that all model files are properly generated and try restarting the app.")
 
 if __name__ == "__main__":
