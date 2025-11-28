@@ -1,10 +1,14 @@
 import sys
 import os
 
-# Add the project root to the python path so imports work correctly
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.append(parent_dir)
+# --- PATH SETUP (CRITICAL FOR CLOUD) ---
+# Get the absolute path to the project root (one level up from src/)
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(CURRENT_DIR) # This is the project root
+
+# Add root to python path
+if BASE_DIR not in sys.path:
+    sys.path.append(BASE_DIR)
 
 import torch
 import joblib
@@ -17,19 +21,20 @@ from sentence_transformers import SentenceTransformer
 
 # Robust Import Logic
 try:
-    # Try importing as a module first (e.g., from main.py)
     from src.rules import RuleEngine
 except ImportError:
-    # Fallback for running script directly inside src/
     try:
         from rules import RuleEngine
     except ImportError:
-        # Fallback for running script from root
-        from src.rules import RuleEngine
+        # Last resort fallback
+        sys.path.append(os.path.join(BASE_DIR, 'src'))
+        from rules import RuleEngine
 
-# CONFIG
-MODEL_DIR = "models/"
+# --- CONFIGURATION ---
+# Use absolute paths to prevent "File Not Found" errors on Cloud
+MODEL_DIR = os.path.join(BASE_DIR, "models")
 QUANTIZED_MODEL_PATH = os.path.join(MODEL_DIR, "quantized_model", "pytorch_model.bin")
+
 # Fallback if the folder structure is flat
 if not os.path.exists(QUANTIZED_MODEL_PATH):
     QUANTIZED_MODEL_PATH = os.path.join(MODEL_DIR, "quantized_model.pt")
@@ -43,15 +48,33 @@ class TransactionEngine:
         
         # 2. Load AI (Quantized DistilBERT)
         self.device = 'cpu'
-        self.tokenizer = DistilBertTokenizerFast.from_pretrained(MODEL_DIR)
-        self.label_map = joblib.load(os.path.join(MODEL_DIR, "label_map.joblib"))
-        self.id2label = {i: l for l, i in self.label_map.items()}
+        
+        # --- FIX: USE HUB TOKENIZER ---
+        # We load the tokenizer from HuggingFace Hub to avoid missing local file errors
+        # This is safe because the tokenizer vocabulary doesn't change for fine-tuning
+        try:
+            print("⏳ AI: Downloading standard tokenizer...")
+            self.tokenizer = DistilBertTokenizerFast.from_pretrained('distilbert-base-uncased')
+        except Exception:
+            # Fallback to local if internet fails (unlikely on cloud)
+            self.tokenizer = DistilBertTokenizerFast.from_pretrained(MODEL_DIR)
+
+        # Load Label Map
+        label_map_path = os.path.join(MODEL_DIR, "label_map.joblib")
+        if os.path.exists(label_map_path):
+            self.label_map = joblib.load(label_map_path)
+            self.id2label = {i: l for l, i in self.label_map.items()}
+        else:
+            print("❌ AI: Label map not found! Check models/ folder.")
+            self.label_map = {}
+            self.id2label = {}
         
         # Load Architecture & Weights
         try:
             # Try to load the full quantized model first
-            if os.path.exists(os.path.join(MODEL_DIR, "quantized_model.pt")):
-                self.model = torch.load(os.path.join(MODEL_DIR, "quantized_model.pt"), map_location=self.device, weights_only=False)
+            full_model_path = os.path.join(MODEL_DIR, "quantized_model.pt")
+            if os.path.exists(full_model_path):
+                self.model = torch.load(full_model_path, map_location=self.device)
                 print("✅ AI: Loaded full quantized model")
             else:
                 # Fallback: Load architecture and apply quantization
@@ -85,18 +108,30 @@ class TransactionEngine:
                         
         except Exception as e:
             print(f"❌ AI: Failed to load model - {e}")
-            raise
+            # Don't raise here, allow the app to run in "Rules Only" mode if AI fails
+            self.model = None
             
-        self.model.eval()
+        if self.model:
+            self.model.eval()
         
         # 3. Load Semantic Memory (FAISS)
         print("🧠 MEMORY: Loading Vector Store...")
         try:
             self.embedder = SentenceTransformer('all-MiniLM-L6-v2')
-            self.index = faiss.read_index(os.path.join(MODEL_DIR, "faiss_index.bin"))
-            with open(os.path.join(MODEL_DIR, "faiss_meta.pkl"), "rb") as f:
-                self.memory_meta = pickle.load(f)
-            print(f"✅ MEMORY: Loaded {len(self.memory_meta)} reference transactions")
+            
+            index_path = os.path.join(MODEL_DIR, "faiss_index.bin")
+            meta_path = os.path.join(MODEL_DIR, "faiss_meta.pkl")
+            
+            if os.path.exists(index_path) and os.path.exists(meta_path):
+                self.index = faiss.read_index(index_path)
+                with open(meta_path, "rb") as f:
+                    self.memory_meta = pickle.load(f)
+                print(f"✅ MEMORY: Loaded {len(self.memory_meta)} reference transactions")
+            else:
+                print("⚠️ MEMORY: FAISS index or meta file missing. Semantic fallback disabled.")
+                self.index = None
+                self.memory_meta = []
+                
         except Exception as e:
             print(f"❌ MEMORY: Failed to load FAISS index - {e}")
             self.index = None
@@ -107,54 +142,54 @@ class TransactionEngine:
     def predict(self, text):
         """
         Main prediction method with three-tier architecture
-        
-        Args:
-            text: Raw transaction string
-            
-        Returns:
-            Dictionary with classification results
         """
         start_time = time.time()
         result = {}
 
         # LEVEL 1: RULES (O(1) matching)
-        rule_hit = self.rule_engine.apply(text)
-        if rule_hit:
-            result = rule_hit
-            result['latency_ms'] = round((time.time() - start_time) * 1000, 2)
-            result['tier'] = 1
-            return result
-
-        # LEVEL 2: AI MODEL (DistilBERT with confidence threshold)
         try:
-            inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=64)
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                probs = torch.nn.functional.softmax(outputs.logits, dim=-1)
-                confidence, predicted_id = torch.max(probs, dim=1)
+            rule_hit = self.rule_engine.apply(text)
+            if rule_hit:
+                result = rule_hit
+                result['latency_ms'] = round((time.time() - start_time) * 1000, 2)
+                result['tier'] = 1
+                return result
+        except Exception as e:
+            print(f"⚠️ Rule Engine Error: {e}")
+
+        # LEVEL 2: AI MODEL (DistilBERT)
+        if self.model is not None:
+            try:
+                inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=64)
+                with torch.no_grad():
+                    outputs = self.model(**inputs)
+                    probs = torch.nn.functional.softmax(outputs.logits, dim=-1)
+                    confidence, predicted_id = torch.max(probs, dim=1)
+                    
+                conf_score = confidence.item()
                 
-            conf_score = confidence.item()
-            
-            # Threshold Check (60% confidence)
-            if conf_score > 0.60:
-                full_label = self.id2label[predicted_id.item()]
-                cat, subcat = full_label.split(" > ")
-                result = {
-                    "category": cat,
-                    "subcategory": subcat,
-                    "confidence": round(conf_score, 4),
-                    "source": "AI_MODEL",
-                    "reason": f"Model Confidence: {conf_score:.1%}",
-                    "tier": 2
-                }
-            else:
-                # LEVEL 3: SEMANTIC FALLBACK
+                # Threshold Check (60% confidence)
+                if conf_score > 0.60:
+                    full_label = self.id2label[predicted_id.item()]
+                    cat, subcat = full_label.split(" > ")
+                    result = {
+                        "category": cat,
+                        "subcategory": subcat,
+                        "confidence": round(conf_score, 4),
+                        "source": "AI_MODEL",
+                        "reason": f"Model Confidence: {conf_score:.1%}",
+                        "tier": 2
+                    }
+                else:
+                    # LEVEL 3: SEMANTIC FALLBACK
+                    result = self._semantic_fallback(text)
+                    result['tier'] = 3
+            except Exception as e:
+                print(f"❌ AI prediction failed: {e}")
                 result = self._semantic_fallback(text)
                 result['tier'] = 3
-                
-        except Exception as e:
-            print(f"❌ AI prediction failed: {e}")
-            # Fallback to semantic search
+        else:
+            # If Model failed to load, go straight to fallback
             result = self._semantic_fallback(text)
             result['tier'] = 3
 
@@ -162,22 +197,15 @@ class TransactionEngine:
         return result
 
     def _semantic_fallback(self, text):
-        """
-        Semantic fallback using FAISS similarity search
-        
-        Args:
-            text: Transaction text to classify
-            
-        Returns:
-            Classification result based on similar transactions
-        """
+        """Semantic fallback using FAISS similarity search"""
         if self.index is None or len(self.memory_meta) == 0:
             return {
                 "category": "Unknown",
                 "subcategory": "Unknown",
                 "confidence": 0.0,
                 "source": "FALLBACK_FAILED",
-                "reason": "Semantic memory not available"
+                "reason": "Semantic memory not available",
+                "tier": 3
             }
         
         try:
@@ -193,7 +221,7 @@ class TransactionEngine:
             neighbor_idx = I[0][0]
             if neighbor_idx < len(self.memory_meta):
                 neighbor_data = self.memory_meta[neighbor_idx]
-                similarity_score = D[0][0]  # Cosine similarity (higher is better)
+                similarity_score = float(D[0][0])  # Cosine similarity
                 
                 # Convert similarity to confidence (0.0 to 0.8 scale)
                 confidence = min(0.8, similarity_score * 0.9)
@@ -234,17 +262,19 @@ class TransactionEngine:
             "total_categories": len(self.label_map)
         }
 
-# Global instance for easy access
-transaction_engine = TransactionEngine()
+# --- GLOBAL INSTANCE REMOVED ---
+# Do not instantiate here! It causes double loading in Streamlit.
+# transaction_engine = TransactionEngine() 
 
 # Simple Test
 if __name__ == "__main__":
+    # Only instantiate when running this script directly
     engine = TransactionEngine()
     
     test_cases = [
         "Uber Trip",           # Should be Rule
         "Starbucks 0229",      # Should be AI  
-        "Hulu Subscription",   # Should be Semantic (if not in training)
+        "Hulu Subscription",   # Should be Semantic
         "SQ *MERCHANT 231",    # Should be Semantic
         "UNKNOWN TRANSACTION"  # Should be Unknown
     ]
@@ -256,17 +286,8 @@ if __name__ == "__main__":
         print(f"\n📥 Input: '{text}'")
         result = engine.predict(text)
         
-        print(f"   📊 Category: {result['category']} > {result['subcategory']}")
-        print(f"   🎯 Confidence: {result['confidence']:.1%}")
-        print(f"   🔧 Source: {result['source']} (Tier {result['tier']})")
-        print(f"   ⚡ Latency: {result['latency_ms']}ms")
-        print(f"   💡 Reason: {result['reason']}")
-    
-    # Print engine info
-    print("\n" + "=" * 60)
-    print("🔧 ENGINE INFORMATION")
-    info = engine.get_engine_info()
-    print(f"   Rules: {info['rules_loaded']} patterns")
-    print(f"   AI Model: {'✅' if info['ai_model_loaded'] else '❌'}")
-    print(f"   Semantic Memory: {info['semantic_references']} references")
-    print(f"   Total Categories: {info['total_categories']}")
+        print(f"   📊 Category: {result.get('category')} > {result.get('subcategory')}")
+        print(f"   🎯 Confidence: {result.get('confidence', 0):.1%}")
+        print(f"   🔧 Source: {result.get('source')} (Tier {result.get('tier')})")
+        print(f"   ⚡ Latency: {result.get('latency_ms')}ms")
+        print(f"   💡 Reason: {result.get('reason')}")
